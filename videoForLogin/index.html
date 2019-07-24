@@ -1,0 +1,330 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="X-UA-Compatible" content="ie=edge">
+    <title>电脑PC端拍照功能</title>
+</head>
+<body>
+    <div id="app">
+        <div class="content">
+            <div class="login" v-show="!flag"> 
+                <div class="steps">
+    
+                </div>
+                <div class="telWrap">
+                    <span>手机号</span>&nbsp;&nbsp;&nbsp;
+                    <input type="tel" placeholder="请输入手机号" name="telphone" id="tel" v-model="tel">
+                </div>
+                <div class="next">
+                    <input type="button" value="下一步"  @click="next">  
+                </div>
+            </div>         
+            <!--拍照-->
+            <div class="imgWrap" v-show="flag">
+                <div class="cameraBox">
+                    <video id="video" ></video>
+                    <span>将脸移入圈内，系统自动识别身份</span>
+                </div>
+                <div class="canvasWrap" style="display: none;">
+                    <canvas id='canvas' width='330' height='440' style="display: block"></canvas>
+                </div> 
+            </div>            
+            <!-- <div class="buttonWrap">
+                <Button @click="handleCamera">拍摄照片</Button>
+                <Button long size='large' @click="takePhone">拍照</Button>
+            </div>  --> 
+        </div>
+       
+    </div>
+    <script src="https://cdn.jsdelivr.net/npm/vue/dist/vue.js"></script>
+    <script src="./assets/js/jquery.min.js"></script>
+    <script>
+        // import toastV from './toast.vue'
+        new Vue({
+            el: '#app',
+            data: {
+                canvas: null,
+                video: null,
+                MediaStreamTrack: null,
+                tel: '',
+                flag: false
+            },
+            mounted() {
+                // 摄像头
+                this.video = document.getElementById('video')
+                this.canvas = document.getElementById('canvas')
+            },
+            methods: {                
+                next() {
+                    this.flag = false;
+                    this.tel = (this.tel + '').trim();
+                    let PhoneReg = /^1[3|4|5|6|7|8]\d{9}$/;
+                    if( !this.tel){
+                        alert('请输入手机号')
+                    }else if (!PhoneReg.test(this.tel)) {
+                        alert('手机号格式错误')
+                    } else {
+                        this.flag = true;
+                        this.handleCamera();
+                    }
+
+                },
+                handleCamera() {
+                    let that = this
+                    if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+                        navigator.mediaDevices.getUserMedia({
+                            video: true,
+                            audio: false
+                        }).then(function (stream) {
+                            console.log('navigator.mediaDevices', navigator.mediaDevices)
+                            that.MediaStreamTrack = typeof stream.stop === 'function' ? stream : stream.getTracks()[0]
+                            that.video.srcObject = stream
+                            that.video.play()
+                            if(this.timer == null) {
+                                this.timer = setInterval( () => {
+                                    that.takePhone()
+                                }, 3000)
+                            }
+                        }).catch(function (err) {
+                            console.log(err)
+                        })
+                    }
+                },
+                takePhone() {
+                    let that = this
+                    that.canvas.getContext('2d').drawImage(this.video, 135, 0, 330, 440, 0, 0, 330, 440) // context.drawImage(img,sx,sy,swidth,sheight,x,y,width,height)
+                    let dataurl = that.canvas.toDataURL('image/jpeg')
+                    that.dataurl = dataurl
+                    console.log(dataurl)
+                    that.blobFile = that.dataURLtoFile(dataurl, 'camera.jpg')
+                    console.log(that.blobFile)
+                    that.changeFileImg(that.blobFile)
+                },
+                async changeFileImg(_file) {
+                    let _this = this
+                    console.log('图片大小：', _file.size / 1024 / 1024)
+                    // if (_file.size / 1024 / 1024 > 0.2) {
+                        this.imgCompress(_file, { quality: 0.3 }, function (base64Data){
+                            let _b = _this.convertBase64ToBlob(base64Data)
+                            let _fm = new FormData()
+                            _fm.append('image', _b)
+
+                            let _upFile = _fm.get('image')
+                            console.log('原图大小：', _file.size / 1024 / 1024)
+                            console.log('压缩后大小：', _b.size / 1024 / 1024)
+                            
+                            _this.dataurl = base64Data
+                            _this.takePhoneUpfile()
+                        })
+                    // }else{
+                    //     _this.takePhoneUpfile()
+                    // }
+                },
+                dataURLtoFile(dataurl, filename) {
+                    let arr = dataurl.split(',')
+                    let mime = arr[0].match(/:(.*?);/)[1]
+                    let bstr = atob(arr[1])
+                    let n = bstr.length
+                    let u8arr = new Uint8Array(n)
+                    while (n--) {
+                        u8arr[n] = bstr.charCodeAt(n)
+                    }
+                    return new File([u8arr], filename, {type: mime})
+                },
+                takePhoneUpfile() {
+                    let that = this
+                    $.ajax({
+                        url: "/next",
+                        type: 'post',
+                        data: {
+                            tel: that.tel,
+                            img: that.dataurl
+                        },
+                        success: function(data) {
+                           console.log(data);
+                           if (data.code == 200) {
+                                clearInterval(this.timer);
+                                that.MediaStreamTrack && that.MediaStreamTrack.stop();
+                           }
+                           
+                        }
+                    });
+                },
+                // 图片压缩相关
+                imgCompress(file, w, objDiv) {
+                    let ready = new FileReader(),
+                        _this = this
+                    ready.readAsDataURL(file)
+                    ready.onload = function() {
+                        let res = this.result
+                        _this.canvasDataUrl(res, w, objDiv)
+                    }
+                },
+                canvasDataUrl(path, obj, cb) {
+                    let img = new Image(),
+                        _this = this
+                    img.src = path
+                    img.onload = function () {
+                        let that = this
+                        let w = that.width,
+                        h = that.height,
+                        scale = w / h
+                        w = obj.width || w
+                        h = obj.height || (w / scale)
+                        let quality = 0.7               // 默认图片质量为0.7
+                        //生成canvas
+                        let canvas = document.createElement('canvas')
+                        let ctx = canvas.getContext('2d');
+                        // 创建属性节点
+                        let anw = document.createAttribute("width")
+                        anw.nodeValue = w
+                        let anh = document.createAttribute("height")
+                        anh.nodeValue = h
+                        canvas.setAttributeNode(anw)
+                        canvas.setAttributeNode(anh)
+                        ctx.drawImage(that, 0, 0, w, h)
+                        // 图像质量
+                        if (obj.quality && obj.quality <= 1 && obj.quality > 0) {
+                        quality = obj.quality
+                        }
+                        // quality值越小，所绘制出的图像越模糊
+                        let base64 = canvas.toDataURL('image/jpeg', quality)
+                        _this.imgUrl = base64
+                        
+                        cb(base64)  // 回调函数返回base64的
+                    }
+                },                
+                convertBase64ToBlob(data) {
+                    let arr = data.split(','),
+                        mime = arr[0].match(/:(.*?);/)[1],
+                        bstr = atob(arr[1]),
+                        n = bstr.length,
+                        u8arr = new Uint8Array(n)
+                    while(n--) {
+                        u8arr[n] = bstr.charCodeAt(n)
+                    }
+                    return new Blob([u8arr], {
+                        type: mime
+                    })
+                },
+            }
+        })
+    </script>
+    <style>
+        #app {
+            width: 100%;
+            height:100%;
+            display: flex;
+            -webkit-justify-content: center;
+            justify-content: center;
+        }
+        .content {
+            width: 100%;
+            height: auto;
+            
+        }
+        .content .login {
+            flex: 1;
+            width:500px;
+            height:400px;
+            border-radius: 10px;
+            background:#130435;
+            display: flex;
+            flex-direction: column;
+        }
+        .content .login .steps {
+            width: 100px;
+            height: 180px;
+            flex: 2;
+            /* background: #fff; */
+            margin: auto;
+        }
+        .content .login .telWrap {
+            flex: 1;
+            width: 260px;
+            height:26px;
+            margin: auto;
+            display: flex;
+            -webkit-justify-content: center;
+            justify-content: center;
+        }
+        .content .login .next {
+            flex: 1;
+            display: flex;
+            justify-content: center;
+        }
+        .content .login span {
+            color: #fff;
+            font-size: 14px;
+            line-height:26px;
+        }
+        .content .login input[type=tel] {
+            text-align: center;
+            border: none;
+            width: 200px;
+            height:24px;
+            line-height: 24px;
+            border-radius: 10px;
+            background: #fff;
+        }
+        .content .login input[type=button] {
+            text-align: center;
+            border: none;
+            color: #fff;
+            font-size: 12px;
+            width: 100px;
+            height:28px;
+            line-height: 28px;
+            border-radius: 6px;
+            background: #7306cc;
+            display: block;
+            margin: auto;
+            margin-bottom: 40px;
+        }
+        .content .imgWrap {
+            display: flex;
+            position: absolute;
+            top:0;
+            left:0;
+            width:500px;
+            height:400px;
+            background:#130435;
+            border-radius: 10px;
+            /* display: none; */
+        }
+        .content .imgWrap span {
+            color: #fff;
+            font-size: 14px;
+            white-space: nowrap;
+            margin: 20px -30px;
+            display: block;
+        }
+        #video {
+            width: 100%;
+            height: 100%; 
+            object-fit: cover;
+            border-radius:50%;
+        }
+        .content .cameraBox{
+            /* flex: 1; */
+            display: inline-block;
+            border: 1px solid gray;
+            margin: auto;
+            border-radius:50%;
+            background: #fff;
+            width: 150px;
+            height:150px;
+        }
+        .content .buttonWrap {
+            width: 100%;
+            height: 50px;
+        }
+        .content .buttonWrap button {
+            width:100px;
+            height: 30px;
+        }
+    </style>
+</body>
+</html>
